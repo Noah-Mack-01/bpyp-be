@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"noerkrieg.com/server/api"
@@ -66,6 +67,18 @@ func main() {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusOK)
 		json.NewEncoder(writer).Encode(mockExercise)
+	})
+	r.Get("/v1/translator", func(writer http.ResponseWriter, r *http.Request) {
+		queryParams := r.URL.Query()
+		userID := queryParams.Get("uid")     // Access the "uid" query parameter
+		exerciseId := queryParams.Get("eid") // Access the "eid" query parameter
+
+		if userID == "" || exerciseId == "" {
+			writer.WriteHeader(http.StatusBadRequest)
+			writer.Write([]byte("Missing uid or eid query parameter"))
+			return
+		}
+
 	})
 	http.ListenAndServe(":3000", r)
 }
