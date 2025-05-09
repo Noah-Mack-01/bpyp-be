@@ -15,12 +15,6 @@ func getClient() *supabase.Client {
 	return client
 }
 
-func test() {
-	client := getClient()
-	client.From("users").Select("*", "exact", false).Execute()
-	// data, count, err := client.From("countries").Select("*", "exact", false).Execute()
-}
-
 func GetUser(session string) (string, error) {
 	response, _, err := getClient().From("sessions").Select("user_id", "exact", false).Eq("session_id", session).Single().Execute()
 	if err != nil {
