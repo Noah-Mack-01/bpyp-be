@@ -2,37 +2,15 @@ package controller
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"time"
 
-	"noerkrieg.com/server/wit"
+	"github.com/google/uuid"
+	"noerkrieg.com/server/repository"
 )
 
-type Controller struct{}
-
-func (c Controller) ProcessMessage(writer http.ResponseWriter, r *http.Request) {
-	queryParams := r.URL.Query()
-	message := queryParams.Get("message")
-	processed, err := wit.ProcessMessage(message)
-	if err != nil {
-		log.Fatalf("Error on processing message in wit.ai: %v", err)
-	}
-	response := wit.PostProcess(processed)
-
-	if err != nil {
-		writer.WriteHeader(422)
-		writer.Write([]byte(fmt.Sprintf("Could not issue message to NLP with message %v: %v", message, err)))
-		return
-	} else {
-		writer.Header().Set("Content-Type", "application/json")
-		writer.WriteHeader(200)
-		writer.Write(response)
-	}
-
-}
-
-func (c Controller) GetExercises(writer http.ResponseWriter, r *http.Request) {
+func (c *Controller) GetExercises(writer http.ResponseWriter, r *http.Request) {
 	queryParams := r.URL.Query()
 	userID := queryParams.Get("uid")     // Access the "uid" query parameter
 	exerciseId := queryParams.Get("eid") // Access the "eid" query parameter
@@ -60,4 +38,77 @@ func (c Controller) GetExercises(writer http.ResponseWriter, r *http.Request) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusOK)
 	json.NewEncoder(writer).Encode(mockExercise)
+}
+
+func (c *Controller) GetHealth(writer http.ResponseWriter, r *http.Request) {
+	writer.WriteHeader(http.StatusOK)
+	writer.Write([]byte("OK"))
+}
+
+func (c *Controller) GetJobStatus(writer http.ResponseWriter, r *http.Request) {
+	queries := r.URL.Query()
+	id := queries.Get("id")
+	job, err := getJobStatusHandler(c.SupabaseStore, id)
+	if err != nil {
+	}
+	if job == nil {
+	}
+	writer.Header().Set("Content-Type", "application/json")
+
+	// Set status code based on job status
+	if job.Status == repository.StatusPending || job.Status == repository.StatusProcessing {
+		writer.WriteHeader(http.StatusAccepted) // 202
+	} else {
+		writer.WriteHeader(http.StatusOK) // 200
+	}
+
+	if err := json.NewEncoder(writer).Encode(job); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}
+
+func (c *Controller) CreateJob(writer http.ResponseWriter, r *http.Request) {
+	var req JobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(writer, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate request data
+	if len(req.Data) == 0 {
+		http.Error(writer, "Request data cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	// Create new job
+	jobID := uuid.New().String()
+	now := time.Now()
+	job := &repository.Job{
+		ID:         jobID,
+		Status:     repository.StatusPending,
+		Data:       req.Data,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		RetryCount: 0,
+	}
+	if err := submitJobHandler(job, c.SupabaseStore); err != nil {
+		log.Printf("Error creating job: %v", err)
+		http.Error(writer, "Failed to create job", http.StatusInternalServerError)
+		return
+	}
+
+	// Return 202 Accepted with job info
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(http.StatusAccepted)
+
+	resp := JobResponse{
+		JobID:          jobID,
+		Status:         repository.StatusPending,
+		StatusEndpoint: "/v1/job?id=" + jobID,
+		CreatedAt:      job.CreatedAt,
+	}
+
+	if err := json.NewEncoder(writer).Encode(resp); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
