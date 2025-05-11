@@ -1,5 +1,7 @@
 package wit
 
+import "time"
+
 type WorkoutData struct {
 	Entities map[string][]EntityValue `json:"entities"`
 	Intents  []Intent                 `json:"intents"`
@@ -37,11 +39,17 @@ type Trait struct {
 
 // Output exercise schema
 type Exercise struct {
-	Exercise       string   `json:"exercise"`
-	Sets           float64  `json:"sets,omitempty"`
-	Quantity       float64  `json:"quantity,omitempty"`
-	QuantityType   string   `json:"quantity_type,omitempty"`
-	Resistance     float64  `json:"resistance,omitempty"`
-	ResistanceType string   `json:"resistance_type,omitempty"`
-	Attributes     []string `json:"attributes,omitempty"`
+	Exercise       string    `json:"exercise_name"`
+	Summary        string    `json:"summary,omitempty"`
+	Type           string    `json:"type,omitempty"`
+	Sets           float64   `json:"sets,omitempty"`
+	Quantity       float64   `json:"work,omitempty"`
+	QuantityType   string    `json:"work_type,omitempty"`
+	Resistance     float64   `json:"resistance,omitempty"`
+	ResistanceType string    `json:"resistance_type,omitempty"`
+	Duration       float64   `json:"duration,omitempty"`
+	Attributes     []string  `json:"attributes,omitempty"`
+	UserId         string    `json:"user_id,omitempty"`
+	Timestamp      time.Time `json:"exercise_ts"`
+	Id             string    `json:"id,omitempty"`
 }

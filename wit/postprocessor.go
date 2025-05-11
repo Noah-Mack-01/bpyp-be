@@ -327,16 +327,16 @@ func abs(x int) int {
 }
 
 // Example usage
-func PostProcess(data []byte) ([]byte, error) {
+func PostProcess(data []byte) ([]byte, []Exercise, error) {
 	// Example of a simple workout data in the new format
 	exercises, err := ProcessWorkoutData(data)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Output the processed exercises
 	result, _ := json.MarshalIndent(exercises, "", "  ")
 	fmt.Println(string(result))
-	return result, nil
+	return result, exercises, nil
 }

@@ -24,9 +24,6 @@ func main() {
 	}
 
 	defer supabaseStore.Close()
-	if err := supabaseStore.Init(); err != nil {
-		log.Fatalf("Could not initialize SupabaseStore. Encountered error: %v", err)
-	}
 
 	queue = repository.NewWorkQueue(5, supabaseStore)
 	queue.Start()

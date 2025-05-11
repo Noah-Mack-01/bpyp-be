@@ -95,79 +95,6 @@ func NewSupabaseStore(DBUrl string, SessionUrl string) (*SupabaseStore, error) {
 	return store, nil
 }
 
-func (j *SupabaseStore) Init() error {
-	query := `
-	CREATE TABLE IF NOT EXISTS jobs (
-		id UUID PRIMARY KEY,
-		status TEXT NOT NULL,
-		data JSONB NOT NULL,
-		result JSONB,
-		error TEXT,
-		created_at TIMESTAMPTZ NOT NULL,
-		updated_at TIMESTAMPTZ NOT NULL,
-		retry_count INTEGER NOT NULL DEFAULT 0,
-		user_id TEXT
-	);
-	CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-	CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
-	CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id);
-
-	-- Enable row-level security
-	ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
-
-	-- Create policy for API access
-	DO $$
-	BEGIN
-		IF NOT EXISTS (
-			SELECT 1 FROM pg_policies WHERE tablename = 'jobs' AND policyname = 'api_select_policy'
-		) THEN
-			CREATE POLICY api_select_policy ON jobs FOR SELECT USING (true);
-		END IF;
-	END
-	$$;
-
-	-- Enable Supabase realtime for this table
-	COMMENT ON TABLE jobs IS 'enable_rls=true,replica=true';
-
-	-- Create notification function for job updates
-	CREATE OR REPLACE FUNCTION notify_job_change()
-	RETURNS TRIGGER AS $$
-	DECLARE
-		payload JSON;
-	BEGIN
-		-- Create JSON payload with relevant job information
-		payload := json_build_object(
-			'id', NEW.id,
-			'status', NEW.status,
-			'updated_at', NEW.updated_at,
-			'user_id', NEW.user_id,
-			'operation', TG_OP
-		);
-
-		-- Send notification to 'job_updates' channel
-		PERFORM pg_notify('job_updates', payload::text);
-		RETURN NEW;
-	END;
-	$$ LANGUAGE plpgsql;
-
-	-- Create or replace triggers for INSERT and UPDATE operations
-	DROP TRIGGER IF EXISTS job_insert_trigger ON jobs;
-	CREATE TRIGGER job_insert_trigger
-		AFTER INSERT ON jobs
-		FOR EACH ROW
-		EXECUTE FUNCTION notify_job_change();
-
-	DROP TRIGGER IF EXISTS job_update_trigger ON jobs;
-	CREATE TRIGGER job_update_trigger
-		AFTER UPDATE ON jobs
-		FOR EACH ROW
-		EXECUTE FUNCTION notify_job_change();
-	`
-
-	_, err := j.DB.Exec(context.Background(), query)
-	return err
-}
-
 // Create adds a new job
 func (j *SupabaseStore) Create(job *Job) error {
 	log.Printf("job %v", &job)
@@ -647,8 +574,11 @@ func processClaimedJob(job *Job, workerID string, store *SupabaseStore) {
 		if updateErr := store.Update(job); updateErr != nil {
 			log.Printf("Worker %s error updating completed job: %v", workerID, updateErr)
 		} else {
-			log.Printf("Worker %s successfully completed job %s", workerID, job.ID)
+			log.Printf("Worker %s successfully updated job %s", workerID, job.ID)
 		}
+
+		// we need to now update exercises with the parsed JSON from job.results.
+
 	}
 }
 
@@ -676,10 +606,12 @@ func processJob(job *Job) (json.RawMessage, error) {
 		log.Printf("Error on sending message to Wit: %v", err)
 		return nil, err
 	}
-	response, err := wit.PostProcess(processed)
+	response, exercises, err := wit.PostProcess(processed)
 	if err != nil {
 		log.Printf("Error post processing message: %v", err)
 		return nil, err
 	}
+
+	UploadExercises(exercises, job.UserID)
 	return response, nil
 }

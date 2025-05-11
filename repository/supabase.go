@@ -4,31 +4,34 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/supabase-community/supabase-go"
+	"noerkrieg.com/server/wit"
 )
 
 func getClient() *supabase.Client {
-	client, err := supabase.NewClient(os.Getenv("BPYP_SUPABASE_URL"), os.Getenv("BPYP_SUPABASE_ANON_KEY"), &supabase.ClientOptions{})
+
+	// Create a client with the anonymous key first
+	client, err := supabase.NewClient(os.Getenv("BPYP_SUPABASE_URL"), os.Getenv("BPYP_SUPABASE_SERVICE_KEY"), &supabase.ClientOptions{})
 	if err != nil {
 		log.Fatalf("Cannot initialize client, %v", err)
 	}
+	// Set the auth token to use the web_service role
 	return client
 }
 
-/*
-	func GetUser(jwt string) (string, error) {
-		client := getClient()
-
-		response, _, err := getClient().From("sessions").Select("user_id", "exact", false).Eq("session_id", session).Single().Execute()
-		if err != nil {
-			return "", err
+func UploadExercises(exercises []wit.Exercise, userID string) {
+	client := getClient()
+	for _, ex := range exercises {
+		ex.UserId = userID
+		ex.Timestamp = time.Now()
+		if _, _, err := client.From("exercises").Insert(ex, true, "id", "minimal", "").Execute(); err != nil {
+			log.Printf("Failed to insert exercise for job; %v", err)
 		}
-		userID := string(response)
-		return userID, nil
 	}
-*/
+}
 
 // If you want to fully verify the token as well:
 func VerifyAndGetUserID(tokenString string) (string, error) {
