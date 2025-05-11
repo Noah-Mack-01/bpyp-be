@@ -15,8 +15,8 @@ func submitJobHandler(job *repository.Job, s *repository.SupabaseStore) error {
 
 	// Use explicit parameter types to avoid statement cache issues
 	query := `
-	INSERT INTO jobs (id, status, data, result, error, created_at, updated_at, retry_count)
-	VALUES ($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::timestamptz, $7::timestamptz, $8::integer)`
+	INSERT INTO jobs (id, status, data, result, error, created_at, updated_at, retry_count, user_id)
+	VALUES ($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::timestamptz, $7::timestamptz, $8::integer, $9::uuid)`
 
 	_, err := s.DB.Exec(
 		ctx, query, //mandatory
@@ -28,6 +28,7 @@ func submitJobHandler(job *repository.Job, s *repository.SupabaseStore) error {
 		job.CreatedAt,
 		job.UpdatedAt,
 		job.RetryCount,
+		job.UserID,
 	)
 
 	return err

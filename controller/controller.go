@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,10 +13,10 @@ import (
 
 func (c *Controller) GetExercises(writer http.ResponseWriter, r *http.Request) {
 	queryParams := r.URL.Query()
-	userID := queryParams.Get("uid")     // Access the "uid" query parameter
+	userSession := r.Header.Get("Authorization")
 	exerciseId := queryParams.Get("eid") // Access the "eid" query parameter
 
-	if userID == "" || exerciseId == "" {
+	if userSession == "" || exerciseId == "" {
 		writer.WriteHeader(http.StatusBadRequest)
 		writer.Write([]byte("Missing uid or eid query parameter"))
 		return
@@ -83,6 +84,14 @@ func (c *Controller) CreateJob(writer http.ResponseWriter, r *http.Request) {
 	// Create new job
 	jobID := uuid.New().String()
 	now := time.Now()
+	jwt := strings.Split(r.Header.Get("Authorization"), " ")[1]
+	userID, err := repository.VerifyAndGetUserID(jwt)
+	if err != nil {
+		log.Printf("Could not find user for session, encountered %v", err)
+		http.Error(writer, "Failed to create job", http.StatusUnauthorized)
+		return
+	}
+	log.Print(userID)
 	job := &repository.Job{
 		ID:         jobID,
 		Status:     repository.StatusPending,
@@ -90,6 +99,7 @@ func (c *Controller) CreateJob(writer http.ResponseWriter, r *http.Request) {
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		RetryCount: 0,
+		UserID:     userID,
 	}
 	if err := submitJobHandler(job, c.SupabaseStore); err != nil {
 		log.Printf("Error creating job: %v", err)

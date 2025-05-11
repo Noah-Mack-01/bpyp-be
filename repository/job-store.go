@@ -105,10 +105,12 @@ func (j *SupabaseStore) Init() error {
 		error TEXT,
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
-		retry_count INTEGER NOT NULL DEFAULT 0
+		retry_count INTEGER NOT NULL DEFAULT 0,
+		user_id TEXT
 	);
 	CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 	CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
+	CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id);
 
 	-- Enable row-level security
 	ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
@@ -138,6 +140,7 @@ func (j *SupabaseStore) Init() error {
 			'id', NEW.id,
 			'status', NEW.status,
 			'updated_at', NEW.updated_at,
+			'user_id', NEW.user_id,
 			'operation', TG_OP
 		);
 
@@ -169,8 +172,8 @@ func (j *SupabaseStore) Init() error {
 func (j *SupabaseStore) Create(job *Job) error {
 	log.Printf("job %v", &job)
 	query := `
-	INSERT INTO jobs (id, status, data, result, error, created_at, updated_at, retry_count)
-	VALUES ($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::timestamptz, $7::timestamptz, $8::integer)
+	INSERT INTO jobs (id, status, data, result, error, created_at, updated_at, retry_count, user_id)
+	VALUES ($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::timestamptz, $7::timestamptz, $8::integer, $9::text)
 	`
 
 	_, err := j.DB.Exec(
@@ -184,13 +187,14 @@ func (j *SupabaseStore) Create(job *Job) error {
 		job.CreatedAt,
 		job.UpdatedAt,
 		job.RetryCount,
+		job.UserID,
 	)
 
 	return err
 }
 
 func (j *SupabaseStore) Get(id string) (*Job, error) {
-	query := `SELECT id, status, data, result, error, created_at, updated_At, retry_count FROM jobs where id = $1::uuid`
+	query := `SELECT id, status, data, result, error, created_at, updated_At, retry_count, user_id FROM jobs where id = $1::uuid`
 	var job Job
 	err := j.DB.QueryRow(context.Background(), query, id).Scan(
 		&job.ID,
@@ -201,6 +205,7 @@ func (j *SupabaseStore) Get(id string) (*Job, error) {
 		&job.CreatedAt,
 		&job.UpdatedAt,
 		&job.RetryCount,
+		&job.UserID,
 	)
 	if err == pgx.ErrNoRows {
 		log.Printf("No job found with id %v", id)
@@ -293,16 +298,16 @@ func (s *SupabaseStore) ClaimJob(workerID string) (*Job, error) {
 
 	var job Job
 	err = tx.QueryRow(ctx, `
-		UPDATE jobs 
+		UPDATE jobs
 		SET status = $1::text, updated_at = $2::timestamptz
 		WHERE id = (
-			SELECT id FROM jobs 
-			WHERE (status = $3::text OR (status = $4::text AND retry_count < 3)) 
-			ORDER BY created_at ASC 
+			SELECT id FROM jobs
+			WHERE (status = $3::text OR (status = $4::text AND retry_count < 3))
+			ORDER BY created_at ASC
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING id, status, data, result, error, created_at, updated_at, retry_count
+		RETURNING id, status, data, result, error, created_at, updated_at, retry_count, user_id
 	`, StatusProcessing, time.Now(), StatusPending, StatusFailed).Scan(
 		&job.ID,
 		&job.Status,
@@ -312,6 +317,7 @@ func (s *SupabaseStore) ClaimJob(workerID string) (*Job, error) {
 		&job.CreatedAt,
 		&job.UpdatedAt,
 		&job.RetryCount,
+		&job.UserID,
 	)
 
 	if err != nil {
@@ -428,6 +434,7 @@ func (s *SupabaseStore) StartListener() error {
 				ID        string    `json:"id"`
 				Status    string    `json:"status"`
 				UpdatedAt time.Time `json:"updated_at"`
+				UserID    string    `json:"user_id"`
 				Operation string    `json:"operation"`
 			}
 
@@ -436,8 +443,8 @@ func (s *SupabaseStore) StartListener() error {
 				continue
 			}
 
-			log.Printf("Notification payload: job %s status %s operation %s",
-				payload.ID, payload.Status, payload.Operation)
+			log.Printf("Notification payload: job %s status %s user_id %s operation %s",
+				payload.ID, payload.Status, payload.UserID, payload.Operation)
 
 			// If this is a new or updated job with a pending status, fetch it and send to the channel
 			if payload.Status == StatusPending || (payload.Status == StatusFailed && payload.Operation == "UPDATE") {
