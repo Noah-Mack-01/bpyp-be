@@ -606,12 +606,53 @@ func processJob(job *Job) (json.RawMessage, error) {
 		log.Printf("Error on sending message to Wit: %v", err)
 		return nil, err
 	}
-	response, exercises, err := wit.PostProcess(processed)
+	exercises, err := wit.PostProcess(processed)
 	if err != nil {
 		log.Printf("Error post processing message: %v", err)
 		return nil, err
 	}
 
-	UploadExercises(exercises, job.UserID, message)
+	response, uploadErrors, err := UploadExercises(exercises, job.UserID, message)
+	if err != nil {
+		// Critical error that prevented any processing
+		return nil, fmt.Errorf("critical error in exercise upload: %w", err)
+	}
+
+	// Handle partial success case
+	if len(uploadErrors) > 0 {
+		// Log individual errors
+		for i, e := range uploadErrors {
+			log.Printf("Upload error %d: %v", i+1, e)
+		}
+
+		// Decide whether to treat this as successful with warnings or as a failure
+		if response != nil && len(response) > 0 {
+			// We have at least some successful results - consider it a partial success
+			log.Printf("Job completed with %d errors, but some exercises were successfully processed",
+				len(uploadErrors))
+
+			// Create a response that includes error information
+			resultMap := map[string]interface{}{
+				"data": json.RawMessage(response),
+				"partial_success": true,
+				"error_count": len(uploadErrors),
+			}
+
+			// Convert to JSON
+			enhancedResponse, err := json.Marshal(resultMap)
+			if err != nil {
+				log.Printf("Error creating enhanced response: %v", err)
+				// Fall back to returning just the original response
+				return response, nil
+			}
+
+			return enhancedResponse, nil
+		} else {
+			// No successful exercises - treat as a failure
+			return nil, fmt.Errorf("failed to upload any exercises: %v", uploadErrors[0])
+		}
+	}
+
+	// Complete success
 	return response, nil
 }

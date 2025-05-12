@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -22,16 +23,71 @@ func getClient() *supabase.Client {
 	return client
 }
 
-func UploadExercises(exercises []wit.Exercise, userID string, message string) {
+func UploadExercises(exercises []wit.Exercise, userID string, message string) ([]byte, []error, error) {
 	client := getClient()
-	for _, ex := range exercises {
-		ex.UserId = userID
-		ex.Summary = fmt.Sprintf(`"%v"`, message)
-		ex.Timestamp = time.Now()
-		if _, _, err := client.From("exercises").Insert(ex, true, "id", "minimal", "").Execute(); err != nil {
-			log.Printf("Failed to insert exercise for job; %v", err)
-		}
+	errors := make([]error, 0)
+	compiled := make([]map[string]interface{}, 0)
+	stats := struct {
+		Total     int
+		Succeeded int
+		Failed    int
+	}{
+		Total: len(exercises),
 	}
+
+	// Set common fields on all exercises
+	now := time.Now()
+	for i := range exercises {
+		exercises[i].UserId = userID
+		exercises[i].Summary = fmt.Sprintf(`"%v"`, message)
+		exercises[i].Timestamp = now
+	}
+
+	for _, ex := range exercises {
+		// Attempt to upsert the exercise
+		res, statusCode, err := client.From("exercises").Upsert(ex, "id", "representation", "exact").Execute()
+		if err != nil {
+			log.Printf("Failed to insert exercise %s: %v (status: %d)", ex.Exercise, err, statusCode)
+			errors = append(errors, fmt.Errorf("failed to insert exercise %s: %w", ex.Exercise, err))
+			stats.Failed++
+			continue
+		}
+
+		// Process the response
+		var js []map[string]interface{}
+		if err := json.Unmarshal(res, &js); err != nil {
+			nErr := fmt.Errorf("unmarshalling error for exercise %s: %w", ex.Exercise, err)
+			errors = append(errors, nErr)
+			stats.Failed++
+			continue
+		}
+
+		if len(js) == 0 {
+			nErr := fmt.Errorf("empty response for exercise %s", ex.Exercise)
+			errors = append(errors, nErr)
+			stats.Failed++
+			continue
+		}
+
+		// Record success
+		compiled = append(compiled, js[0])
+		stats.Succeeded++
+	}
+
+	// Marshal results
+	result, err := json.Marshal(compiled)
+	if err != nil {
+		return nil, errors, fmt.Errorf("failed to marshal compiled results: %w", err)
+	}
+
+	// Log operation summary
+	log.Printf("Exercise upload summary: total=%d, succeeded=%d, failed=%d",
+		stats.Total, stats.Succeeded, stats.Failed)
+	if len(errors) > 0 {
+		log.Printf("Upload errors: %v", errors)
+	}
+
+	return result, errors, nil
 }
 
 // If you want to fully verify the token as well:
@@ -70,9 +126,9 @@ func VerifyAndGetUserID(tokenString string) (string, error) {
 	return "", fmt.Errorf("invalid token claims")
 }
 
-func GetExercise(eid string) ([]byte, error) {
+func GetExercise(eid string, uid string) ([]byte, error) {
 	client := getClient()
-	data, _, err := client.From("exercises").Select("*", "1", false).Eq("id", eid).Execute()
+	data, _, err := client.From("exercises").Select("*", "1", false).Eq("id", eid).Eq("user_id", uid).Execute()
 	if err != nil {
 		return nil, fmt.Errorf("failed to find exercise ID %v", eid)
 	}
