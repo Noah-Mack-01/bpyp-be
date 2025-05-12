@@ -612,6 +612,6 @@ func processJob(job *Job) (json.RawMessage, error) {
 		return nil, err
 	}
 
-	UploadExercises(exercises, job.UserID)
+	UploadExercises(exercises, job.UserID, message)
 	return response, nil
 }

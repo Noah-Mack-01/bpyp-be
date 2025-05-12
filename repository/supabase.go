@@ -22,10 +22,11 @@ func getClient() *supabase.Client {
 	return client
 }
 
-func UploadExercises(exercises []wit.Exercise, userID string) {
+func UploadExercises(exercises []wit.Exercise, userID string, message string) {
 	client := getClient()
 	for _, ex := range exercises {
 		ex.UserId = userID
+		ex.Summary = fmt.Sprintf(`"%v"`, message)
 		ex.Timestamp = time.Now()
 		if _, _, err := client.From("exercises").Insert(ex, true, "id", "minimal", "").Execute(); err != nil {
 			log.Printf("Failed to insert exercise for job; %v", err)
