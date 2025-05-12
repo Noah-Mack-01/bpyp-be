@@ -36,7 +36,6 @@ func UploadExercises(exercises []wit.Exercise, userID string, message string) {
 
 // If you want to fully verify the token as well:
 func VerifyAndGetUserID(tokenString string) (string, error) {
-	// Get Supabase JWT secret from environment
 	jwtSecret := os.Getenv("BPYP_POSTGRES_JWT_SECRET")
 	if jwtSecret == "" {
 		return "", fmt.Errorf("JWT Secret not set")
@@ -69,4 +68,15 @@ func VerifyAndGetUserID(tokenString string) (string, error) {
 	}
 
 	return "", fmt.Errorf("invalid token claims")
+}
+
+func GetExercise(eid string) ([]byte, error) {
+	client := getClient()
+	data, _, err := client.From("exercises").Select("*", "1", false).Eq("id", eid).Execute()
+	if err != nil {
+		return nil, fmt.Errorf("failed to find exercise ID %v", eid)
+	}
+
+	log.Print(string(data))
+	return data, nil
 }

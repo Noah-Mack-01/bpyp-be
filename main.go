@@ -44,7 +44,7 @@ func main() {
 		r.Get("/job", ctrlr.GetJobStatus)
 		r.Post("/job", ctrlr.CreateJob)
 		r.Get("/health", ctrlr.GetHealth)
-		r.Get("/exercises", ctrlr.GetExercises)
+		r.Get("/exercises", ctrlr.GetExercise)
 	})
 	http.ListenAndServe(":3000", router)
 }

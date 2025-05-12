@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -10,36 +11,6 @@ import (
 	"github.com/google/uuid"
 	"noerkrieg.com/server/repository"
 )
-
-func (c *Controller) GetExercises(writer http.ResponseWriter, r *http.Request) {
-	queryParams := r.URL.Query()
-	userSession := r.Header.Get("Authorization")
-	exerciseId := queryParams.Get("eid") // Access the "eid" query parameter
-
-	if userSession == "" || exerciseId == "" {
-		writer.WriteHeader(http.StatusBadRequest)
-		writer.Write([]byte("Missing uid or eid query parameter"))
-		return
-	}
-
-	// Mock exercise JSON
-	mockExercise := map[string]any{
-		"key":             exerciseId,
-		"exercise":        "Bench Press",
-		"summary":         "5 sets of 5 reps with 185lbs",
-		"type":            "anaerobic",
-		"sets":            5,
-		"work":            5,
-		"workUnit":        "repetitions",
-		"resistance":      185,
-		"resistanceUnits": "pounds",
-		"timeStamp":       "2025-05-03T12:00:00Z",
-	}
-
-	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(http.StatusOK)
-	json.NewEncoder(writer).Encode(mockExercise)
-}
 
 func (c *Controller) GetHealth(writer http.ResponseWriter, r *http.Request) {
 	writer.WriteHeader(http.StatusOK)
@@ -120,5 +91,22 @@ func (c *Controller) CreateJob(writer http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewEncoder(writer).Encode(resp); err != nil {
 		log.Printf("Error encoding response: %v", err)
+	}
+}
+
+func (c *Controller) GetExercise(writer http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	eid := query.Get("eid")
+	if eid == "" {
+		http.Error(writer, "Request eid cannot be empty", http.StatusBadRequest)
+	}
+	ex, err := repository.GetExercise(eid)
+	if err != nil {
+		http.Error(writer, fmt.Sprintf("Could not query eid %v", eid), http.StatusNotFound)
+	}
+	writer.WriteHeader(http.StatusOK)
+	writer.Header().Set("Content-Type", "application/json")
+	if _, err := writer.Write(ex); err != nil {
+		http.Error(writer, "Error on writing JSON to response", http.StatusInternalServerError)
 	}
 }
