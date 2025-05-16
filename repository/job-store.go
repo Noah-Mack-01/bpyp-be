@@ -70,32 +70,7 @@ func NewSupabaseStore(DBUrl string, SessionUrl string) (*SupabaseStore, error) {
 	return store, nil
 }
 
-// Create adds a new job
-func (j *SupabaseStore) Create(job *Job) error {
-	log.Printf("job %v", &job)
-	query := `
-	INSERT INTO jobs (id, status, data, result, error, created_at, updated_at, retry_count, user_id)
-	VALUES ($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::timestamptz, $7::timestamptz, $8::integer, $9::text)
-	`
-
-	_, err := j.Pool.Exec(
-		context.Background(),
-		query,
-		job.ID,
-		job.Status,
-		job.Data,
-		job.Result,
-		job.Error,
-		job.CreatedAt,
-		job.UpdatedAt,
-		job.RetryCount,
-		job.UserID,
-	)
-
-	return err
-}
-
-func (j *SupabaseStore) Get(id string) (*Job, error) {
+func (j *SupabaseStore) getJob(id string) (*Job, error) {
 	query := `SELECT id, status, data, result, error, created_at, updated_At, retry_count, user_id FROM jobs where id = $1::uuid`
 	var job Job
 	err := j.Pool.QueryRow(context.Background(), query, id).Scan(
@@ -120,7 +95,7 @@ func (j *SupabaseStore) Get(id string) (*Job, error) {
 	}
 }
 
-func (s *SupabaseStore) Update(job *Job) error {
+func (s *SupabaseStore) updateJob(job *Job) error {
 	ctx := context.Background()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -350,7 +325,7 @@ func (s *SupabaseStore) StartListener() error {
 
 			// If this is a new or updated job with a pending status, fetch it and send to the channel
 			if payload.Status == StatusPending || (payload.Status == StatusFailed && payload.Operation == "UPDATE") {
-				job, err := s.Get(payload.ID)
+				job, err := s.getJob(payload.ID)
 				if err != nil {
 					log.Printf("Error fetching job from notification: %v", err)
 					continue
@@ -531,7 +506,7 @@ func processClaimedJob(job *Job, workerID string, store *SupabaseStore) {
 		job.Error = err.Error()
 
 		// Handle update errors
-		if updateErr := store.Update(job); updateErr != nil {
+		if updateErr := store.updateJob(job); updateErr != nil {
 			log.Printf("Worker %s error updating failed job: %v", workerID, updateErr)
 		}
 	} else {
@@ -540,7 +515,7 @@ func processClaimedJob(job *Job, workerID string, store *SupabaseStore) {
 		job.Error = ""
 
 		// Handle update errors
-		if updateErr := store.Update(job); updateErr != nil {
+		if updateErr := store.updateJob(job); updateErr != nil {
 			log.Printf("Worker %s error updating completed job: %v", workerID, updateErr)
 		} else {
 			log.Printf("Worker %s successfully updated job %s", workerID, job.ID)
