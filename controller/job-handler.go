@@ -18,7 +18,7 @@ func submitJobHandler(job *repository.Job, s *repository.SupabaseStore) error {
 	INSERT INTO jobs (id, status, data, result, error, created_at, updated_at, retry_count, user_id)
 	VALUES ($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::timestamptz, $7::timestamptz, $8::integer, $9::uuid)`
 
-	_, err := s.DB.Exec(
+	_, err := s.Pool.Exec(
 		ctx, query, //mandatory
 		job.ID, // optionals
 		job.Status,
@@ -43,7 +43,7 @@ func getJobStatusHandler(store *repository.SupabaseStore, jobId string) (*reposi
 		FROM jobs WHERE id = $1::uuid`
 
 	var job repository.Job
-	err := store.DB.QueryRow(ctx, query, jobId).Scan(
+	err := store.Pool.QueryRow(ctx, query, jobId).Scan(
 		&job.ID,
 		&job.Status,
 		&job.Data,

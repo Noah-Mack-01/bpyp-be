@@ -13,12 +13,10 @@ import (
 )
 
 type SupabaseStore struct {
-	// Transaction pool for database operations
-	DB *pgxpool.Pool
 	// Connection pool for session/listener operations
-	ListenerPool *pgxpool.Pool
+	Pool *pgxpool.Pool
 	// Dedicated connection for listening to notifications
-	ListenerConn *pgx.Conn
+	Connection *pgx.Conn
 	// Channels for job notifications
 	jobNotificationChan chan *Job
 	// Context and cancel function for listener
@@ -27,46 +25,25 @@ type SupabaseStore struct {
 }
 
 func NewSupabaseStore(DBUrl string, SessionUrl string) (*SupabaseStore, error) {
-	// Parse configurations for both connection pools
-	config, err := pgxpool.ParseConfig(DBUrl)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing DB URL: %w", err)
-	}
-
 	sessionConfig, err := pgxpool.ParseConfig(SessionUrl)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing Session URL: %w", err)
 	}
 
 	// Configure the connection pools
-	config.MaxConns = 10
 	sessionConfig.MaxConns = 10
-	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	sessionConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	// Disable prepared statement cache to avoid collisions
-
-	// Create the main DB pool for transactions
-	pool, err := pgxpool.NewWithConfig(context.Background(), config)
-	if err != nil {
-		return nil, fmt.Errorf("error creating main DB pool: %w", err)
-	}
-
-	// Test the connection
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("error pinging main DB: %w", err)
-	}
 
 	// Create the listener pool for session/notification operations
 	listenerPool, err := pgxpool.NewWithConfig(context.Background(), sessionConfig)
 	if err != nil {
-		pool.Close()
+		listenerPool.Close()
 		return nil, fmt.Errorf("error creating listener pool: %w", err)
 	}
 
 	// Test the listener pool connection
 	if err := listenerPool.Ping(context.Background()); err != nil {
-		pool.Close()
 		listenerPool.Close()
 		return nil, fmt.Errorf("error pinging listener pool: %w", err)
 	}
@@ -74,7 +51,6 @@ func NewSupabaseStore(DBUrl string, SessionUrl string) (*SupabaseStore, error) {
 	// Create a dedicated connection for the PostgreSQL LISTEN/NOTIFY mechanism
 	listenerConn, err := pgx.ConnectConfig(context.Background(), sessionConfig.ConnConfig)
 	if err != nil {
-		pool.Close()
 		listenerPool.Close()
 		return nil, fmt.Errorf("error creating listener connection: %w", err)
 	}
@@ -84,9 +60,8 @@ func NewSupabaseStore(DBUrl string, SessionUrl string) (*SupabaseStore, error) {
 
 	// Create and return the store with both connection pools and the listener connection
 	store := &SupabaseStore{
-		DB:                  pool,
-		ListenerPool:        listenerPool,
-		ListenerConn:        listenerConn,
+		Pool:                listenerPool,
+		Connection:          listenerConn,
 		jobNotificationChan: make(chan *Job, 100), // Buffer for 100 notifications
 		listenerCtx:         listenerCtx,
 		listenerCancel:      listenerCancel,
@@ -103,7 +78,7 @@ func (j *SupabaseStore) Create(job *Job) error {
 	VALUES ($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::timestamptz, $7::timestamptz, $8::integer, $9::text)
 	`
 
-	_, err := j.DB.Exec(
+	_, err := j.Pool.Exec(
 		context.Background(),
 		query,
 		job.ID,
@@ -123,7 +98,7 @@ func (j *SupabaseStore) Create(job *Job) error {
 func (j *SupabaseStore) Get(id string) (*Job, error) {
 	query := `SELECT id, status, data, result, error, created_at, updated_At, retry_count, user_id FROM jobs where id = $1::uuid`
 	var job Job
-	err := j.DB.QueryRow(context.Background(), query, id).Scan(
+	err := j.Pool.QueryRow(context.Background(), query, id).Scan(
 		&job.ID,
 		&job.Status,
 		&job.Data,
@@ -147,7 +122,7 @@ func (j *SupabaseStore) Get(id string) (*Job, error) {
 
 func (s *SupabaseStore) Update(job *Job) error {
 	ctx := context.Background()
-	tx, err := s.DB.Begin(ctx)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -205,9 +180,9 @@ func (s *SupabaseStore) Update(job *Job) error {
 // ClaimJob claims a job for processing with SKIP LOCKED to prevent race conditions
 func (s *SupabaseStore) ClaimJob(workerID string) (*Job, error) {
 	ctx := context.Background()
-	tx, err := s.DB.Begin(ctx)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
-		log.Printf("Error on DB.Begin")
+		log.Printf("Error on ListenerPool.Begin")
 		return nil, err
 	}
 
@@ -277,7 +252,7 @@ func (s *SupabaseStore) GetPendingJobCount() (int, error) {
 	WHERE status = $1::text OR (status = $2::text AND retry_count < 3)
 	`
 
-	err := s.DB.QueryRow(context.Background(), query, StatusPending, StatusFailed).Scan(&count)
+	err := s.Pool.QueryRow(context.Background(), query, StatusPending, StatusFailed).Scan(&count)
 	return count, err
 }
 
@@ -286,20 +261,20 @@ func (s *SupabaseStore) StartListener() error {
 	log.Println("Starting PostgreSQL notification listener")
 
 	// Ensure we have a valid listener connection
-	if s.ListenerConn == nil {
+	if s.Connection == nil {
 		// Create a new connection if it doesn't exist
 		var err error
-		s.ListenerConn, err = pgx.ConnectConfig(s.listenerCtx, s.ListenerPool.Config().ConnConfig)
+		s.Connection, err = pgx.ConnectConfig(s.listenerCtx, s.Pool.Config().ConnConfig)
 		if err != nil {
 			return fmt.Errorf("error creating listener connection: %w", err)
 		}
 	}
 
 	// Start listening for notifications on the 'job_updates' channel
-	_, err := s.ListenerConn.Exec(s.listenerCtx, "LISTEN job_updates")
+	_, err := s.Connection.Exec(s.listenerCtx, "LISTEN job_updates")
 	if err != nil {
-		s.ListenerConn.Close(context.Background())
-		s.ListenerConn = nil
+		s.Connection.Close(context.Background())
+		s.Connection = nil
 		return fmt.Errorf("error listening to job_updates channel: %w", err)
 	}
 
@@ -307,7 +282,7 @@ func (s *SupabaseStore) StartListener() error {
 
 	// Start goroutine to handle notifications
 	go func() {
-		conn := s.ListenerConn // Local reference to the connection
+		conn := s.Connection // Local reference to the connection
 		defer func() {
 			if conn != nil {
 				conn.Close(context.Background())
@@ -331,7 +306,7 @@ func (s *SupabaseStore) StartListener() error {
 				}
 
 				// Try to reconnect
-				conn, err = pgx.ConnectConfig(s.listenerCtx, s.ListenerPool.Config().ConnConfig)
+				conn, err = pgx.ConnectConfig(s.listenerCtx, s.Pool.Config().ConnConfig)
 				if err != nil {
 					log.Printf("Failed to reconnect: %v", err)
 					time.Sleep(5 * time.Second)
@@ -349,7 +324,7 @@ func (s *SupabaseStore) StartListener() error {
 				}
 
 				// Update the store's connection reference
-				s.ListenerConn = conn
+				s.Connection = conn
 				log.Println("Successfully reconnected and subscribed to 'job_updates'")
 				continue
 			}
@@ -412,21 +387,15 @@ func (s *SupabaseStore) StopListener() {
 
 // Close closes the database connection pools and stops the listener
 func (s *SupabaseStore) Close() {
-	s.StopListener()
-
-	// Close both connection pools
-	if s.DB != nil {
-		s.DB.Close()
-	}
-
-	if s.ListenerPool != nil {
-		s.ListenerPool.Close()
-	}
-
 	// Ensure the listener connection is closed
-	if s.ListenerConn != nil {
-		s.ListenerConn.Close(context.Background())
-		s.ListenerConn = nil
+	if s.Connection != nil {
+		s.Connection.Close(context.Background())
+		s.Connection = nil
+	}
+
+	s.StopListener()
+	if s.Pool != nil {
+		s.Pool.Close()
 	}
 }
 
@@ -633,9 +602,9 @@ func processJob(job *Job) (json.RawMessage, error) {
 
 			// Create a response that includes error information
 			resultMap := map[string]interface{}{
-				"data": json.RawMessage(response),
+				"data":            json.RawMessage(response),
 				"partial_success": true,
-				"error_count": len(uploadErrors),
+				"error_count":     len(uploadErrors),
 			}
 
 			// Convert to JSON
