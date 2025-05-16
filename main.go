@@ -8,13 +8,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"noerkrieg.com/server/controller"
 	"noerkrieg.com/server/repository"
 )
 
 func main() {
 	var queue *repository.WorkQueue
-	var ctrlr *controller.Controller
 	var supabaseStore *repository.SupabaseStore
 	var router *chi.Mux
 
@@ -33,19 +31,17 @@ func main() {
 
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"}, // Replace with your allowed origins
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET" /*"POST", "PUT", "DELETE",*/, "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		AllowCredentials: true,
 		MaxAge:           300, // Maximum value for preflight request cache
 	}))
 
-	ctrlr = &controller.Controller{SupabaseStore: supabaseStore, WorkQueue: queue}
 	router.Route("/v1", func(r chi.Router) {
-		r.Get("/job", ctrlr.GetJobStatus)
-		r.Post("/job", ctrlr.CreateJob)
-		r.Get("/health", ctrlr.GetHealth)
-		r.Get("/exercises", ctrlr.GetExercise)
-		r.Post("/exercises", ctrlr.CreateExercise)
+		r.Get("/health", func(writer http.ResponseWriter, req *http.Request) {
+			writer.WriteHeader(http.StatusOK)
+			writer.Write([]byte("OK"))
+		})
 	})
 	http.ListenAndServe(":3000", router)
 }
