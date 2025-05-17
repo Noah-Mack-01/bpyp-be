@@ -19,4 +19,5 @@ sudo docker run $PORT_MAPPING \
     -e BPYP_POSTGRES_JWT_SECRET="${BPYP_POSTGRES_JWT_SECRET}" \
     -e BPYP_WIT_URL="${BPYP_WIT_URL}" \
     -e BPYP_WIT_API_KEY="${BPYP_BEARER_API}" \
+    -e OPENAI_API_KEY="${OPENAI_API_KEY}"\
     bpyp-go:latest
