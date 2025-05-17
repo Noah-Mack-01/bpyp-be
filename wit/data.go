@@ -50,6 +50,6 @@ type Exercise struct {
 	Duration       float64   `json:"duration,omitempty"`
 	Attributes     []string  `json:"attributes,omitempty"`
 	UserId         string    `json:"user_id,omitempty"`
-	Timestamp      time.Time `json:"exercise_ts"`
+	Timestamp      time.Time `json:"created_ts"`
 	Id             string    `json:"id,omitempty"`
 }

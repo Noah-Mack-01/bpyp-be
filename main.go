@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -22,8 +23,8 @@ func main() {
 	}
 
 	defer supabaseStore.Close()
-
-	queue = repository.NewWorkQueue(5, supabaseStore)
+	workerCount := runtime.NumCPU() - 1
+	queue = repository.NewWorkQueue(workerCount, supabaseStore)
 	queue.Start()
 
 	router = chi.NewRouter()
