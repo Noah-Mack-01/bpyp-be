@@ -18,7 +18,7 @@ func ProcessMessage(message string) ([]byte, error) {
 	}
 
 	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("Authorization", fmt.Sprintf("Bearer %v", os.Getenv("BPYP_BEARER_API")))
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %v", os.Getenv("BPYP_WIT_API_KEY")))
 	request.Header.Add("Accept", "*/*")
 
 	resp, err := getClient().Do(request)

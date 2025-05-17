@@ -17,7 +17,7 @@ func main() {
 	var supabaseStore *repository.SupabaseStore
 	var router *chi.Mux
 
-	supabaseStore, err := repository.NewSupabaseStore(os.Getenv("BPYP_POSTGRES_CONN"), os.Getenv("BPYP_POSTGRES_DIR_CONN"))
+	supabaseStore, err := repository.NewSupabaseStore(os.Getenv("BPYP_POSTGRES_DIR_CONN"))
 	if err != nil {
 		log.Fatalf("Could not create SupabaseStore. Encountered error: %v", err)
 	}

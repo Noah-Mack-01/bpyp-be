@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,14 +25,14 @@ type SupabaseStore struct {
 	listenerCancel context.CancelFunc
 }
 
-func NewSupabaseStore(DBUrl string, SessionUrl string) (*SupabaseStore, error) {
+func NewSupabaseStore(SessionUrl string) (*SupabaseStore, error) {
 	sessionConfig, err := pgxpool.ParseConfig(SessionUrl)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing Session URL: %w", err)
 	}
 
 	// Configure the connection pools
-	sessionConfig.MaxConns = 10
+	sessionConfig.MaxConns = int32(runtime.NumCPU() - 1)
 	sessionConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	// Disable prepared statement cache to avoid collisions
 
