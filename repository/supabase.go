@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/supabase-community/supabase-go"
-	"noerkrieg.com/server/wit"
+	o4mini "noerkrieg.com/server/o4-mini"
 )
 
 func getClient() *supabase.Client {
@@ -23,7 +23,8 @@ func getClient() *supabase.Client {
 	return client
 }
 
-func UploadExercises(exercises []wit.Exercise, userID string, message string) ([]byte, []error, error) {
+func UploadExercises(exercises []o4mini.Exercise, userID string, message string) ([]byte, []error, error) {
+	log.Print(exercises)
 	client := getClient()
 	errors := make([]error, 0)
 	compiled := make([]map[string]interface{}, 0)

@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"noerkrieg.com/server/wit"
+	o4mini "noerkrieg.com/server/o4-mini"
 )
 
 type SupabaseStore struct {
@@ -546,18 +546,13 @@ func processJob(job *Job) (json.RawMessage, error) {
 		log.Printf("Request did not contain message.")
 		return nil, fmt.Errorf("request %v did not contain key 'message'", js)
 	}
-	processed, err := wit.ProcessMessage(message)
+	processed, err := o4mini.ProcessMessage(message)
 	if err != nil {
 		log.Printf("Error on sending message to Wit: %v", err)
 		return nil, err
 	}
-	exercises, err := wit.PostProcess(processed)
-	if err != nil {
-		log.Printf("Error post processing message: %v", err)
-		return nil, err
-	}
 
-	response, uploadErrors, err := UploadExercises(exercises, job.UserID, message)
+	response, uploadErrors, err := UploadExercises(processed, job.UserID, message)
 	if err != nil {
 		// Critical error that prevented any processing
 		return nil, fmt.Errorf("critical error in exercise upload: %w", err)
