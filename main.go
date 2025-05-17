@@ -5,12 +5,21 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"noerkrieg.com/server/repository"
 )
+
+// max returns the maximum of two integers
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 func main() {
 	var queue *repository.WorkQueue
@@ -23,7 +32,22 @@ func main() {
 	}
 
 	defer supabaseStore.Close()
-	workerCount := runtime.NumCPU() - 1
+	
+	// Calculate worker count based on available CPUs
+	cpuCount := runtime.NumCPU()
+	
+	// Get worker multiplier from env or default to 2
+	multiplier := 2
+	if multiplierEnv := os.Getenv("BPYP_WORKER_MULTIPLIER"); multiplierEnv != "" {
+		if m, err := strconv.Atoi(multiplierEnv); err == nil && m > 0 {
+			multiplier = m
+		}
+	}
+	
+	workerCount := max(1, cpuCount*multiplier/runtime.GOMAXPROCS(0))
+	log.Printf("Starting with %d workers (CPU count: %d, multiplier: %d)", 
+		workerCount, cpuCount, multiplier)
+	
 	queue = repository.NewWorkQueue(workerCount, supabaseStore)
 	queue.Start()
 
