@@ -71,7 +71,7 @@ func NewSupabaseStore(SessionUrl string) (*SupabaseStore, error) {
 	return store, nil
 }
 
-func (j *SupabaseStore) getJob(id string) (*Job, error) {
+func (j *SupabaseStore) get(id string) (*Job, error) {
 	query := `SELECT id, status, data, result, error, created_at, updated_At, retry_count, user_id FROM jobs where id = $1::uuid`
 	var job Job
 	err := j.Pool.QueryRow(context.Background(), query, id).Scan(
@@ -153,8 +153,8 @@ func (s *SupabaseStore) updateJob(job *Job) error {
 	return err
 }
 
-// ClaimJob claims a job for processing with SKIP LOCKED to prevent race conditions
-func (s *SupabaseStore) ClaimJob(workerID string) (*Job, error) {
+// claim claims a job for processing with SKIP LOCKED to prevent race conditions
+func (s *SupabaseStore) claim() (*Job, error) {
 	ctx := context.Background()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -326,7 +326,7 @@ func (s *SupabaseStore) StartListener() error {
 
 			// If this is a new or updated job with a pending status, fetch it and send to the channel
 			if payload.Status == StatusPending || (payload.Status == StatusFailed && payload.Operation == "UPDATE") {
-				job, err := s.getJob(payload.ID)
+				job, err := s.get(payload.ID)
 				if err != nil {
 					log.Printf("Error fetching job from notification: %v", err)
 					continue
@@ -375,224 +375,116 @@ func (s *SupabaseStore) Close() {
 	}
 }
 
-func NewWorkQueue(workers int, store *SupabaseStore) *WorkQueue {
-	return &WorkQueue{
-		workers:  workers,
-		store:    store,
-		shutdown: make(chan struct{}),
-	}
-}
-
-// Start initializes the worker pool and notification listener
-func (p *WorkQueue) Start() {
-	// Start the PostgreSQL notification listener
-	if err := p.store.StartListener(); err != nil {
-		log.Printf("Warning: Failed to start notification listener: %v", err)
-		log.Printf("Workers will rely on periodic polling for jobs")
-	} else {
-		log.Printf("PostgreSQL notification listener started")
+// upload uploads exercises to the database using the direct PostgreSQL connection
+func (s *SupabaseStore) upload(exercises []o4mini.Exercise, userID string, message string) ([]byte, []error, error) {
+	log.Print(exercises)
+	errors := make([]error, 0)
+	compiled := make([]map[string]interface{}, 0)
+	stats := struct {
+		Total     int
+		Succeeded int
+		Failed    int
+	}{
+		Total: len(exercises),
 	}
 
-	// Start worker goroutines
-	for i := 0; i < p.workers; i++ {
-		p.wg.Add(1)
-		go p.worker(i)
+	// Set common fields on all exercises
+	now := time.Now()
+	for i := range exercises {
+		exercises[i].UserId = userID
+		exercises[i].Summary = fmt.Sprintf(`"%v"`, message)
+		exercises[i].Timestamp = now
 	}
-	log.Printf("Started %d workers", p.workers)
-}
 
-// Shutdown gracefully stops the processor
-func (p *WorkQueue) Shutdown(ctx context.Context) {
-	close(p.shutdown)
+	ctx := context.Background()
 
-	// Wait for all workers to finish with timeout
-	done := make(chan struct{})
-	go func() {
-		p.wg.Wait()
-		close(done)
-	}()
+	for _, ex := range exercises {
+		// Attempt to upsert the exercise using direct PostgreSQL connection
+		query := `
+			INSERT INTO exercises (
+				exercise_name, summary, type, sets, work, work_type,
+				resistance, resistance_type, duration, attributes, user_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+			ON CONFLICT (id) DO UPDATE SET
+				exercise_name = $1,
+				summary = $2,
+				type = $3,
+				sets = $4,
+				work = $5,
+				work_type = $6,
+				resistance = $7,
+				resistance_type = $8,
+				duration = $9,
+				attributes = $10,
+				user_id = $11
+			RETURNING *;
+		`
 
-	select {
-	case <-done:
-		log.Println("All workers gracefully stopped")
-	case <-ctx.Done():
-		log.Println("Shutdown timeout: some workers may still be running")
-	}
-}
-
-func (p *WorkQueue) worker(id int) {
-	defer p.wg.Done()
-	workerID := fmt.Sprintf("worker-%d", id)
-
-	log.Printf("Worker %s started", workerID)
-
-	// Get the notification channel
-	notificationChan := p.store.GetNotificationChannel()
-
-	// For handling retries and backoff
-	backoff := 100 * time.Millisecond
-	maxBackoff := 5 * time.Second
-
-	// This provides a way to check for pending jobs on startup or after errors
-	checkForPendingJobs := true
-
-	for {
-		if checkForPendingJobs {
-			// Check for pending jobs actively (useful at startup and after errors)
-			select {
-			case <-p.shutdown:
-				log.Printf("Worker %s shutting down", workerID)
-				return
-			default:
-				// Try to claim a job
-				job, err := p.store.ClaimJob(workerID)
-				if err != nil {
-					log.Printf("Worker %s error claiming job: %v", workerID, err)
-					// Use exponential backoff for errors
-					time.Sleep(backoff)
-					backoff = min(backoff*2, maxBackoff)
-				} else if job != nil {
-					// Process the claimed job
-					processClaimedJob(job, workerID, p.store)
-					// Reset backoff on successful operation
-					backoff = 100 * time.Millisecond
-				} else {
-					// No jobs to claim, switch to listening for notifications
-					checkForPendingJobs = false
-				}
-			}
+		// Convert string array to proper PostgreSQL array
+		var attributes []string
+		if ex.Attributes != nil {
+			attributes = ex.Attributes
 		} else {
-			// Wait for notifications or shutdown signal
-			select {
-			case <-p.shutdown:
-				log.Printf("Worker %s shutting down", workerID)
-				return
-			case job := <-notificationChan:
-				// Got a notification about a new job
-				log.Printf("Worker %s received notification for job %s", workerID, job.ID)
-				// Try to claim this specific job
-				claimedJob, err := p.store.ClaimJob(workerID)
-				if err != nil {
-					log.Printf("Worker %s error claiming notified job: %v", workerID, err)
-					time.Sleep(backoff)
-					backoff = min(backoff*2, maxBackoff)
-					// Check for other pending jobs
-					checkForPendingJobs = true
-				} else if claimedJob != nil {
-					// Process the claimed job
-					processClaimedJob(claimedJob, workerID, p.store)
-					// Reset backoff on successful operation
-					backoff = 100 * time.Millisecond
-					// Check for more pending jobs
-					checkForPendingJobs = true
-				}
-			case <-time.After(30 * time.Second):
-				// Periodically check for pending jobs even without notifications
-				// This provides resilience in case we miss a notification
-				log.Printf("Worker %s periodic check for pending jobs", workerID)
-				checkForPendingJobs = true
-			}
+			attributes = []string{}
 		}
+
+		var result pgx.Rows
+		result, err := s.Pool.Query(ctx, query,
+			ex.Exercise,
+			ex.Summary,
+			ex.Type,
+			ex.Sets,
+			ex.Quantity,
+			ex.QuantityType,
+			ex.Resistance,
+			ex.ResistanceType,
+			ex.Duration,
+			attributes,
+			userID,
+		)
+
+		if err != nil {
+			log.Printf("Failed to insert exercise %s: %v", ex.Exercise, err)
+			errors = append(errors, fmt.Errorf("failed to insert exercise %s: %w", ex.Exercise, err))
+			stats.Failed++
+			continue
+		}
+
+		// Process the result
+		var inserted map[string]interface{}
+		rows, err := pgx.CollectRows(result, pgx.RowToMap)
+		if err != nil {
+			nErr := fmt.Errorf("error collecting rows for exercise %s: %w", ex.Exercise, err)
+			errors = append(errors, nErr)
+			stats.Failed++
+			continue
+		}
+
+		if len(rows) == 0 {
+			nErr := fmt.Errorf("empty response for exercise %s", ex.Exercise)
+			errors = append(errors, nErr)
+			stats.Failed++
+			continue
+		}
+
+		// Record success
+		inserted = rows[0]
+		compiled = append(compiled, inserted)
+		stats.Succeeded++
 	}
-}
 
-// Helper function to process a claimed job
-func processClaimedJob(job *Job, workerID string, store *SupabaseStore) {
-	log.Printf("Worker %s processing job %s", workerID, job.ID)
-	result, err := processJob(job)
-
+	// Marshal results
+	result, err := json.Marshal(compiled)
 	if err != nil {
-		log.Printf("Worker %s job processing error: %v", workerID, err)
-		job.Status = StatusFailed
-		job.Error = err.Error()
-
-		// Handle update errors
-		if updateErr := store.updateJob(job); updateErr != nil {
-			log.Printf("Worker %s error updating failed job: %v", workerID, updateErr)
-		}
-	} else {
-		job.Status = StatusCompleted
-		job.Result = result
-		job.Error = ""
-
-		// Handle update errors
-		if updateErr := store.updateJob(job); updateErr != nil {
-			log.Printf("Worker %s error updating completed job: %v", workerID, updateErr)
-		} else {
-			log.Printf("Worker %s successfully updated job %s", workerID, job.ID)
-		}
-
-		// we need to now update exercises with the parsed JSON from job.results.
-
-	}
-}
-
-// min returns the minimum of two durations
-func min(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func processJob(job *Job) (json.RawMessage, error) {
-	var js map[string]interface{}
-	if err := json.Unmarshal(job.Data, &js); err != nil {
-		log.Printf("Error deserializing job data: %v", err)
-		return nil, err
-	}
-	message, ok := js["message"].(string)
-	if !ok {
-		log.Printf("Request did not contain message.")
-		return nil, fmt.Errorf("request %v did not contain key 'message'", js)
-	}
-	processed, err := o4mini.ProcessMessage(message)
-	if err != nil {
-		log.Printf("Error on sending message to Wit: %v", err)
-		return nil, err
+		return nil, errors, fmt.Errorf("failed to marshal compiled results: %w", err)
 	}
 
-	response, uploadErrors, err := UploadExercises(processed, job.UserID, message)
-	if err != nil {
-		// Critical error that prevented any processing
-		return nil, fmt.Errorf("critical error in exercise upload: %w", err)
+	// Log operation summary
+	log.Printf("Exercise upload summary: total=%d, succeeded=%d, failed=%d",
+		stats.Total, stats.Succeeded, stats.Failed)
+	if len(errors) > 0 {
+		log.Printf("Upload errors: %v", errors)
 	}
 
-	// Handle partial success case
-	if len(uploadErrors) > 0 {
-		// Log individual errors
-		for i, e := range uploadErrors {
-			log.Printf("Upload error %d: %v", i+1, e)
-		}
-
-		// Decide whether to treat this as successful with warnings or as a failure
-		if response != nil && len(response) > 0 {
-			// We have at least some successful results - consider it a partial success
-			log.Printf("Job completed with %d errors, but some exercises were successfully processed",
-				len(uploadErrors))
-
-			// Create a response that includes error information
-			resultMap := map[string]interface{}{
-				"data":            json.RawMessage(response),
-				"partial_success": true,
-				"error_count":     len(uploadErrors),
-			}
-
-			// Convert to JSON
-			enhancedResponse, err := json.Marshal(resultMap)
-			if err != nil {
-				log.Printf("Error creating enhanced response: %v", err)
-				// Fall back to returning just the original response
-				return response, nil
-			}
-
-			return enhancedResponse, nil
-		} else {
-			// No successful exercises - treat as a failure
-			return nil, fmt.Errorf("failed to upload any exercises: %v", uploadErrors[0])
-		}
-	}
-
-	// Complete success
-	return response, nil
+	return result, errors, nil
 }

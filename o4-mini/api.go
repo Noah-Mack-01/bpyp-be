@@ -35,9 +35,9 @@ Return ONLY a valid JSON object containing an array of exercise objects with the
 			"type": "strength, cardio, flexibility, etc.",
 			"sets": number of sets if applicable,
 			"work": numeric quantity of work (reps, distance, etc.),
-			"work_type": "reps", "miles", "kilometers", etc.,
+			"work_type": "repetitions", "miles", "kilometers", etc.,
 			"resistance": amount of resistance if applicable,
-			"resistance_type": "lbs", "kg", "bodyweight", etc.,
+			"resistance_type": "pounds", "kilograms", "bodyweight", etc.,
 			"duration": duration in minutes if applicable,
 			"attributes": ["any", "relevant", "tags"],
 			"created_ts": "current timestamp in ISO format"
@@ -53,7 +53,9 @@ RULES:
 5. Use null for missing optional values, do not include empty strings
 6. Make educated inferences only when the data strongly implies certain values
 7. Always return an array of JSON objects, even if the array only contains a single item
-8. Convert all numbers into their numeric articulation (thirty should be converted to 30)`
+8. Convert all numbers into their numeric articulation (thirty should be converted to 30)
+9. Always standardize to full, plural spelling of a measurement (lb -> pounds), (sec->seconds)
+`
 
 	completion, err := llms.GenerateFromSinglePrompt(ctx, llm, prompt)
 	log.Printf("Completed Prompt:%v", completion)
