@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	o4mini "noerkrieg.com/server/o4-mini"
+	llm "noerkrieg.com/server/llm"
 )
 
 type SupabaseStore struct {
@@ -376,7 +376,7 @@ func (s *SupabaseStore) Close() {
 }
 
 // upload uploads exercises to the database using the direct PostgreSQL connection
-func (s *SupabaseStore) upload(exercises []o4mini.Exercise, userID string, message string) ([]byte, []error, error) {
+func (s *SupabaseStore) upload(exercises []llm.Exercise, userID string, message string) ([]byte, []error, error) {
 	log.Print(exercises)
 	errors := make([]error, 0)
 	compiled := make([]map[string]interface{}, 0)

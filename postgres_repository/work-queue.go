@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	llm "noerkrieg.com/server/o4-mini"
+	llm "noerkrieg.com/server/llm"
 )
 
 func NewWorkQueue(workers int, store *SupabaseStore) *WorkQueue {

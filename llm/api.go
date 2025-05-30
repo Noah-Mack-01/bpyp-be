@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
+	"noerkrieg.com/server/redis_repository"
 )
 
 func ProcessMessage(message string) ([]Exercise, error) {
@@ -17,12 +19,18 @@ func ProcessMessage(message string) ([]Exercise, error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// Get context from Redis
+	redisContext := redis_repository.CachedExercises
+	exerciseContext := fmt.Sprintf("KNOWN EXERCISES: %s\nKNOWN ATTRIBUTES: %s\n\n",
+		strings.Join(redisContext.Exercises, ", "),
+		strings.Join(redisContext.Attributes, ", "))
+
 	prompt := `You are a workout analyzer AI that extracts and structures workout information from user messages.
 
 TASK:
-Parse the message below and identify all exercises mentioned. Return ONLY a JSON array of exercise objects that follow the schema specified below.
+Parse the message below and identify all exercises mentioned. Map exercise names and attributes to the known values provided below when possible. Return ONLY a JSON array of exercise objects that follow the schema specified below.
 
-INPUT MESSAGE:
+` + exerciseContext + `INPUT MESSAGE:
 ` + message + `
 
 RESPONSE FORMAT:
@@ -55,6 +63,8 @@ RULES:
 7. Always return an array of JSON objects, even if the array only contains a single item
 8. Convert all numbers into their numeric articulation (thirty should be converted to 30)
 9. Always standardize to full, plural spelling of a measurement (lb -> pounds), (sec->seconds)
+10. When possible, map exercise names and attributes names to the known values provided in the context above.
+11. When it is not possible to map exercise/attribute names, always map input values to pluralized format with proper-noun capitalization (e.g. "Curls" or "Rows")
 `
 
 	completion, err := llms.GenerateFromSinglePrompt(ctx, llm, prompt)

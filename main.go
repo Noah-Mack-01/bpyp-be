@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"noerkrieg.com/server/repository"
+	repository "noerkrieg.com/server/postgres_repository"
 )
 
 // max returns the maximum of two integers
@@ -32,10 +32,10 @@ func main() {
 	}
 
 	defer supabaseStore.Close()
-	
+
 	// Calculate worker count based on available CPUs
 	cpuCount := runtime.NumCPU()
-	
+
 	// Get worker multiplier from env or default to 2
 	multiplier := 2
 	if multiplierEnv := os.Getenv("BPYP_WORKER_MULTIPLIER"); multiplierEnv != "" {
@@ -43,11 +43,11 @@ func main() {
 			multiplier = m
 		}
 	}
-	
+
 	workerCount := max(1, cpuCount*multiplier/runtime.GOMAXPROCS(0))
-	log.Printf("Starting with %d workers (CPU count: %d, multiplier: %d)", 
+	log.Printf("Starting with %d workers (CPU count: %d, multiplier: %d)",
 		workerCount, cpuCount, multiplier)
-	
+
 	queue = repository.NewWorkQueue(workerCount, supabaseStore)
 	queue.Start()
 
