@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"runtime"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,8 +31,9 @@ func NewSupabaseStore(SessionUrl string) (*SupabaseStore, error) {
 	}
 
 	// Configure the connection pools
-	sessionConfig.MaxConns = int32(runtime.NumCPU() - 1)
+	sessionConfig.MaxConns = 8
 	sessionConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	log.Printf("Allowed %d connections", sessionConfig.MaxConns)
 	// Disable prepared statement cache to avoid collisions
 
 	// Create the listener pool for session/notification operations
@@ -158,7 +158,6 @@ func (s *SupabaseStore) claim() (*Job, error) {
 	ctx := context.Background()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
-		log.Printf("Error on ListenerPool.Begin")
 		return nil, err
 	}
 

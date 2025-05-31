@@ -33,10 +33,7 @@ func main() {
 
 	defer supabaseStore.Close()
 
-	// Calculate worker count based on available CPUs
 	cpuCount := runtime.NumCPU()
-
-	// Get worker multiplier from env or default to 2
 	multiplier := 2
 	if multiplierEnv := os.Getenv("BPYP_WORKER_MULTIPLIER"); multiplierEnv != "" {
 		if m, err := strconv.Atoi(multiplierEnv); err == nil && m > 0 {
@@ -55,11 +52,11 @@ func main() {
 	router.Use(middleware.Logger)
 
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"}, // Replace with your allowed origins
+		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET" /*"POST", "PUT", "DELETE",*/, "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		AllowCredentials: true,
-		MaxAge:           300, // Maximum value for preflight request cache
+		MaxAge:           300,
 	}))
 
 	router.Route("/v1", func(r chi.Router) {
@@ -68,5 +65,5 @@ func main() {
 			writer.Write([]byte("OK"))
 		})
 	})
-	http.ListenAndServe(":3000", router)
+	http.ListenAndServe(":"+os.Getenv("PORT"), router)
 }

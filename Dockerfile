@@ -17,7 +17,7 @@ RUN chmod +x launcher.sh
 # Default configuration
 ENV PORT=3000
 ENV INSTANCE_COUNT=3
-ENV BPYP_WORKER_MULTIPLIER=2
+ENV BPYP_WORKER_MULTIPLIER=5
 
 # Expose a range of ports for multiple instances
 EXPOSE 3000-3010
