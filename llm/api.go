@@ -65,6 +65,7 @@ RULES:
 9. Always standardize to full, plural spelling of a measurement (lb -> pounds), (sec->seconds)
 10. When possible, map exercise names and attributes names to the known values provided in the context above.
 11. When it is not possible to map exercise/attribute names, always map input values to pluralized format with proper-noun capitalization (e.g. "Curls" or "Rows")
+12. Take care with the attributes. False positive matches are worse than false negatives. We do not want exercises to have unrelated attributes to them.
 `
 
 	completion, err := llms.GenerateFromSinglePrompt(ctx, llm, prompt)
